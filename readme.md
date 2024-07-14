@@ -10,10 +10,7 @@ Compatible on Unix based systems that contain the following commands:
 - `mv -t`
 - `rm -r`
 
-## Usage
-
-### Quick start
-
+## Quick start
 ```sh
 # Move content within `one/two/three` to the current working directory $PWD
 
@@ -26,6 +23,20 @@ estrange one/two/three
 # find *
 # four/five.file
 ```
+
+## Usage
+
+### Single argument
+```sh
+estrange one/two/three
+```
+
+
+### Multiple arguments
+```sh
+estrange one/two/three one/two/four
+```
+
 
 ## Contribution
 
