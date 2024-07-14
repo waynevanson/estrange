@@ -4,7 +4,7 @@ A shell command that move child directories up their ancestors and delete the pa
 
 ## Dependencies
 
-Compatible on unix based systems that contain the following commands:
+Compatible on Unix based systems that contain the following commands:
 
 - `sh`
 - `mv -t`
@@ -12,6 +12,28 @@ Compatible on unix based systems that contain the following commands:
 
 ## Usage
 
+### Quick start
+
 ```sh
-estrange <relative-paths-from-pwd>
+# Move content within `one/two/three` to the current working directory $PWD
+
+# print directory structure
+# find *
+# one/two/three/four/five.file
+
+estrange one/two/three
+
+# find *
+# four/five.file
 ```
+
+## Contribution
+
+Please write a test in `test.sh` to ensure your case is covered.
+
+## Considerations
+
+Please consider the following before consuming this code.
+
+- I'm writing this to learn about POSIX scripting, so the software shouldn't be relied upon.
+- Covering my use case only unless asked otherwise.
