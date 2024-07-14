@@ -1,9 +1,4 @@
 #!/bin/sh
-#
-# collapse intermediary files between to relative locations
-#
-# `collapse <directory>`
-#
 
 # Removes "./<path>" and "/<path>" and return "<path>"
 clean_directory_path() {
@@ -24,11 +19,10 @@ do
     # # todo: name collisions on multiple
     mv -t "$PWD/" $directory/*
 
-    root="$(clean_directory_path "$directory")"
-
-    # root="${}"
+    root="$directory"
+    root="$(clean_directory_path "$root")"
     root="$(get_highest_ancestor "$root")"
 
-    # # delete the stuff in between
+    # delete the stuff in between
     rm -rf "$root/"
 done
