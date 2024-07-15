@@ -1,5 +1,12 @@
-use std::path;
+use std::path::PathBuf;
+use clap::Parser;
+
+#[derive(Debug, Default, Parser)]
+struct Arguments {
+    children: Vec<PathBuf>
+}
 
 fn main() {
-    println!("Hello, world!");
+    let args = Arguments::parse();
+    println!("Hello, {:?}!", args);
 }
