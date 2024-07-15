@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "arrterian.nix-env-selector",
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "mkhl.direnv",
+    "bbenoist.nix"
+  ]
+}
