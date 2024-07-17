@@ -1,24 +1,35 @@
 mod relative_path;
 
-use clap::Parser;
+use clap::{error::ContextKind, Parser};
 use std::{
-    fs::{self, DirEntry},
+    fs::{self, DirEntry, ReadDir},
+    io,
     path::{Path, PathBuf},
 };
 
 #[derive(Debug, Default, Parser)]
 struct Arguments {
+    /// Skips any operations that change the file system,
+    /// instead printing the changes that would apply to stdout.
+    #[arg(short, long, alias = "dry")]
+    dry_run: bool,
+
+    /// The sources that we want to move into the target directory.
+    /// Should be one or more sources, although this isn't validated yet.
+    // todo: warn when non empty.
+    sources: Vec<PathBuf>,
+
+    /// The directory we want to move all our sources into.
+    /// Defaults to the current working directory.
     #[arg(short, long)]
     target: Option<PathBuf>,
-
-    // todo: warn when non empty.
-    children: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
 struct ParsedArguments {
     target: PathBuf,
-    children: Vec<PathBuf>,
+    sources: Vec<PathBuf>,
+    dry_run: bool,
 }
 
 impl TryFrom<Arguments> for ParsedArguments {
@@ -31,47 +42,10 @@ impl TryFrom<Arguments> for ParsedArguments {
             .unwrap_or_else(|| std::env::current_dir())?;
 
         Ok(Self {
-            children: arguments.children,
+            dry_run: arguments.dry_run,
+            sources: arguments.sources,
             target,
         })
-    }
-}
-
-fn find_checkable_directories(
-    checkable_directories: &mut Vec<PathBuf>,
-    target: &PathBuf,
-    child: &PathBuf,
-    from: &PathBuf,
-) {
-    let dir_entries = from
-        .read_dir()
-        .expect("[FATAL]: Expected to read directory entries from this dir");
-
-    for dir_entry in dir_entries {
-        let dir_entry = dir_entry
-            .expect("[FATAL]: Expected to find a directory entry in the directory entries");
-
-        let file_type = dir_entry
-            .file_type()
-            .expect("[FATAL]: Expected to get the file type from the directory entry");
-
-        if !file_type.is_dir() {
-            continue;
-        }
-
-        let to = dir_entry.path().splice(target, &child);
-
-        let exists = to
-            .try_exists()
-            .expect("[FATAL]: Expected to check existence of path");
-
-        if !exists {
-            continue;
-        }
-
-        checkable_directories.push(to);
-
-        find_checkable_directories(checkable_directories, target, child, from);
     }
 }
 
@@ -81,7 +55,8 @@ fn main() {
     let args = ParsedArguments::try_from(args)
         .expect("[FATAL]: Expected current working directory to exists");
 
-    for child in args.children {
+    // todo: buffer so we can have dry run
+    for child in args.sources {
         // Check that the child exists in the target.
         let from = if child.is_absolute() {
             child.clone()
@@ -100,64 +75,32 @@ fn main() {
             continue;
         }
 
-        // check directories first, after that we'll check for conflicts in individual files.
-
-        let mut checkable_directories = Vec::new();
-
-        find_checkable_directories(&mut checkable_directories, &args.target, &child, &from);
-
-        // check each checkable directory if there's conflicts for files within.
-
-        let mut conflicts = Vec::<PathBuf>::new();
-
-        // iter non dirs only
-        for dir in checkable_directories {
-            for dir_entry in dir.read_dir().unwrap() {
-                let dir_entry = dir_entry.unwrap();
-
-                let file_type = dir_entry.file_type().unwrap();
-
-                if file_type.is_dir() {
-                    continue;
-                }
-
-                let to = dir_entry.path();
-
-                if to.try_exists().unwrap() {
-                    // could do this while we're iterating in fn above.
-                    conflicts.push(to)
-                }
-            }
-        }
+        let (moveables, conflicts): (Vec<_>, Vec<_>) =
+            FilesUnfollowed::from(from.read_dir().unwrap())
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .into_iter()
+                .map(|filepath| (filepath.clone(), filepath.splice(&args.target, &from)))
+                // todo - try_partition or something from itertools?
+                .partition(|(_, to)| !to.try_exists().unwrap());
 
         if conflicts.len() > 0 {
             println!("[WARNING]: Skipping directory, the following conflicts are present");
 
             for conflict in conflicts {
-                println!("[WARNING]: {conflict:?}");
+                println!("[WARNING]: {:?}", conflict.1);
+            }
+        }
+
+        for (from, to) in moveables {
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent).unwrap();
             }
 
-            continue;
+            fs::rename(from, to).unwrap()
         }
 
-        println!("from:     {from:?}");
-        println!("target:   {:?}", args.target);
-
-        // move the children
-
-        for dir_entry in from.read_dir().unwrap() {
-            let dir_entry = dir_entry.unwrap();
-
-            println!("path: {:?}", dir_entry.path());
-            println!("to:   {:?}", args.target);
-
-            // we need to rename files, not directories.
-            // so I'll get a list of file paths from, and to before hand and then
-            // we can rename those here.
-            fs::rename(dir_entry.path(), args.target.clone())
-                .expect("[FATAL]: Expected to move the child into the parent");
-        }
-
+        // todo: delete parents up to root if they contain
         fs::remove_dir_all(from).unwrap();
     }
 }
@@ -178,12 +121,63 @@ impl SplicePath for PathBuf {
         P: AsRef<Path>,
         Q: AsRef<Path>,
     {
-        let mids: usize = stop.as_ref().components().fold(0, |accu, _| accu + 1);
-        let starts = start.as_ref().components();
+        let start = start.as_ref();
+        let stop = stop.as_ref();
+
+        let starts = start.components();
+
+        let mids: usize = stop.components().fold(0, |accu, _| accu + 1);
         let long = self.components().skip(mids);
 
         let buffer = starts.chain(long).collect();
 
         buffer
+    }
+}
+
+struct FilesUnfollowed {
+    read_dirs: Vec<ReadDir>,
+}
+
+impl From<ReadDir> for FilesUnfollowed {
+    fn from(read_dir: ReadDir) -> Self {
+        Self {
+            read_dirs: vec![read_dir],
+        }
+    }
+}
+
+impl Iterator for FilesUnfollowed {
+    type Item = Result<PathBuf, io::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // No iterators left, we're done.
+        let mut item_option = self.read_dirs.last_mut()?.next();
+
+        while let Some(result) = item_option {
+            match result {
+                Err(error) => return Some(Err(error)),
+                Ok(dir_entry) => match dir_entry.file_type() {
+                    Err(error) => return Some(Err(error)),
+                    Ok(file_type) => {
+                        if file_type.is_file() || file_type.is_symlink() {
+                            return Some(Ok(dir_entry.path()));
+                        } else if file_type.is_dir() {
+                            let result = dir_entry.path().read_dir();
+
+                            match result {
+                                Err(error) => return Some(Err(error)),
+                                Ok(read_dir) => self.read_dirs.push(read_dir),
+                            }
+                        }
+                    }
+                },
+            }
+
+            // go through all the read_dir iterators until they're empty
+            item_option = self.read_dirs.last_mut()?.next();
+        }
+
+        None
     }
 }
