@@ -1,6 +1,9 @@
 mod relative_path;
 
 use clap::Parser;
+use clap_verbosity_flag::{InfoLevel, Verbosity};
+use itertools::Itertools;
+use log::{info, warn};
 use std::{
     fs::{self, ReadDir},
     io,
@@ -23,6 +26,10 @@ struct Arguments {
     /// Defaults to the current working directory.
     #[arg(short, long)]
     target: Option<PathBuf>,
+
+    // https://github.com/clap-rs/clap-verbosity-flag/blob/master/src/lib.rs
+    #[command(flatten)]
+    verbosity: Verbosity<InfoLevel>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +37,7 @@ struct ParsedArguments {
     target: PathBuf,
     sources: Vec<PathBuf>,
     dry_run: bool,
+    log_level: Option<log::Level>,
 }
 
 impl TryFrom<Arguments> for ParsedArguments {
@@ -45,12 +53,17 @@ impl TryFrom<Arguments> for ParsedArguments {
             dry_run: arguments.dry_run,
             sources: arguments.sources,
             target,
+            log_level: arguments.verbosity.log_level(),
         })
     }
 }
 
 fn main() {
     let args = Arguments::parse();
+
+    env_logger::builder()
+        .filter_level(args.verbosity.log_level_filter())
+        .init();
 
     let args = ParsedArguments::try_from(args)
         .expect("[FATAL]: Expected current working directory to exists");
@@ -71,7 +84,7 @@ fn main() {
 
         if !is_directory {
             // todo: I mean this could just mean `rename`.
-            println!("[WARN]: Skipping, expected the child to be a directory");
+            warn!("Skipping, expected the child to be a directory");
             continue;
         }
 
@@ -85,23 +98,51 @@ fn main() {
                 .partition(|(_, to)| !to.try_exists().unwrap());
 
         if conflicts.len() > 0 {
-            println!("[WARNING]: Skipping directory, the following conflicts are present");
+            warn!("Skipping directory, the following conflicts are present");
 
             for conflict in conflicts {
-                println!("[WARNING]: {:?}", conflict.1);
+                warn!("  {:?}", conflict.1);
             }
         }
 
         for (from, to) in moveables {
             if let Some(parent) = to.parent() {
-                fs::create_dir_all(parent).unwrap();
+                if args.dry_run {
+                    info!("create: {parent:?}");
+                } else {
+                    fs::create_dir_all(parent).unwrap();
+                }
             }
 
-            fs::rename(from, to).unwrap()
+            if args.dry_run {
+                info!("move:    {from:?} -> {to:?}");
+            } else {
+                fs::rename(from, to).unwrap()
+            }
         }
 
-        // todo: delete parents up to root if they contain
-        fs::remove_dir_all(from).unwrap();
+        // todo: delete parents up to from if they contain
+        // buffer the one before.
+        // if the parent within the child
+
+        let deletable = from
+            .ancestors()
+            .flat_map(|current| Some((current, current.parent()?)))
+            .filter(|(_, current)| !from.ends_with(current))
+            .find(|(_, parent)| {
+                parent.read_dir().unwrap().any(|result| {
+                    let file_type = result.unwrap().file_type().unwrap();
+                    file_type.is_file() || file_type.is_symlink()
+                })
+            })
+            .map(|a| a.0)
+            .unwrap_or(&from);
+
+        if args.dry_run {
+            info!("remove: {deletable:?}");
+        } else {
+            fs::remove_dir_all(deletable).unwrap();
+        }
     }
 }
 
