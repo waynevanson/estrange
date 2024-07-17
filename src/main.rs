@@ -1,8 +1,8 @@
 mod relative_path;
 
-use clap::{error::ContextKind, Parser};
+use clap::Parser;
 use std::{
-    fs::{self, DirEntry, ReadDir},
+    fs::{self, ReadDir},
     io,
     path::{Path, PathBuf},
 };
