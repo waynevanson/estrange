@@ -219,10 +219,7 @@ fn partition_file_conflicts(
     Ok((moveables, conflicts))
 }
 
-fn get_deletable_directory<'a, 'b>(
-    current: &'a Path,
-    target: &'b Path,
-) -> Result<&'a Path, io::Error> {
+fn get_deletable_directory<'a>(current: &'a Path, target: &Path) -> Result<&'a Path, io::Error> {
     let mut iterator = current.ancestors().peekable();
 
     iterator.next();
@@ -233,7 +230,7 @@ fn get_deletable_directory<'a, 'b>(
         if let Some(parent) = current.parent() {
             if parent == target
                 || parent.contains_file_symlink_in_directory()?
-                || iterator.peek() == None
+                || iterator.peek().is_none()
             {
                 return Ok(current);
             }

@@ -66,25 +66,26 @@
           # Build the crate as part of `nix flake check` for convenience
           inherit my-crate;
 
-          # # Run clippy (and deny all warnings) on the crate source,
-          # # again, reusing the dependency artifacts from above.
-          # #
-          # # Note that this is done as a separate derivation so that
-          # # we can block the CI if there are issues here, but not
-          # # prevent downstream consumers from building our crate by itself.
-          # my-crate-clippy = craneLib.cargoClippy (commonArgs // {
-          #   inherit cargoArtifacts;
-          #   cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-          # });
+          # Run clippy (and deny all warnings) on the crate source,
+          # again, reusing the dependency artifacts from above.
+          #
+          # Note that this is done as a separate derivation so that
+          # we can block the CI if there are issues here, but not
+          # prevent downstream consumers from building our crate by itself.
+          my-crate-clippy = craneLib.cargoClippy (commonArgs // {
+            inherit cargoArtifacts;
+            # cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+            cargoClippyExtraArgs = "--all-targets";
+          });
 
-          # my-crate-doc = craneLib.cargoDoc (commonArgs // {
-          #   inherit cargoArtifacts;
-          # });
+          my-crate-doc = craneLib.cargoDoc (commonArgs // {
+            inherit cargoArtifacts;
+          });
 
-          # # Check formatting
-          # my-crate-fmt = craneLib.cargoFmt {
-          #   inherit src;
-          # };
+          # Check formatting
+          my-crate-fmt = craneLib.cargoFmt {
+            inherit src;
+          };
         };
 
         packages = {
