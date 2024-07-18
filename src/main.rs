@@ -66,6 +66,10 @@ fn main() -> Result<(), io::Error> {
 
     env_logger::builder().filter_level(args.log_filter).init();
 
+    let mut moveable_files = Vec::new();
+    let mut conflicts_files = Vec::new();
+    let mut deletable_directories = Vec::new();
+
     // todo: buffer so we can have dry run
     for child in args.sources {
         // Check that the child exists in the target.
@@ -83,37 +87,52 @@ fn main() -> Result<(), io::Error> {
             continue;
         }
 
-        let (moveable_files, conflicts_files) = partition_file_conflicts(&args.target, &child)?;
+        let partitioned_files = partition_file_conflicts(&args.target, &child)?;
 
-        if conflicts_files.len() > 0 {
-            warn!("Skipping directory, the following conflicts are present");
+        moveable_files.extend(partitioned_files.0);
+        conflicts_files.extend(partitioned_files.1);
 
-            for conflict in conflicts_files {
-                warn!("  {:?} -> {:?}", conflict.0, conflict.1);
-            }
+        let deletable_directory = get_deletable_directory(&child, &args.target)?;
+        deletable_directories.push(deletable_directory.to_owned());
+    }
+
+    if conflicts_files.len() > 0 {
+        warn!("Skipping directory, the following conflicts are present");
+
+        for conflict in conflicts_files {
+            warn!("  {:?} -> {:?}", conflict.0, conflict.1);
+        }
+    }
+
+    let mut creatable_directories = Vec::new();
+    for (_, to_file) in &moveable_files {
+        if let Some(parent) = to_file.parent() {
+            creatable_directories.push(parent);
+        }
+    }
+
+    if args.dry_run {
+        for parent in creatable_directories {
+            info!("create: {parent:?}");
         }
 
         for (from_file, to_file) in moveable_files {
-            if let Some(parent) = to_file.parent() {
-                if args.dry_run {
-                    info!("create: {parent:?}");
-                } else {
-                    fs::create_dir_all(parent).unwrap();
-                }
-            }
-
-            if args.dry_run {
-                info!("move:    {from_file:?} -> {to_file:?}");
-            } else {
-                fs::rename(from_file, to_file).unwrap()
-            }
+            info!("move:    {from_file:?} -> {to_file:?}");
         }
 
-        let deletable_directory = get_deletable_directory(&child, &args.target)?;
-
-        if args.dry_run {
+        for deletable_directory in deletable_directories {
             info!("remove: {deletable_directory:?}");
-        } else {
+        }
+    } else {
+        for parent in creatable_directories {
+            fs::create_dir_all(parent)?;
+        }
+
+        for (from_file, to_file) in moveable_files {
+            fs::rename(from_file, to_file)?;
+        }
+
+        for deletable_directory in deletable_directories {
             fs::remove_dir_all(deletable_directory)?;
         }
     }
