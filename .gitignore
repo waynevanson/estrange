@@ -1,1 +1,7 @@
 /test
+
+# Added by cargo
+
+/target
+
+/fixtures_test
