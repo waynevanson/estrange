@@ -1,11 +1,13 @@
 mod relative_path;
+mod skip_last;
 
 use clap::Parser;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 use itertools::Itertools;
 use log::{info, warn};
+use skip_last::SkipLast;
 use std::{
-    fs::{self, ReadDir},
+    fs::{self, read_dir, ReadDir},
     io,
     path::{Path, PathBuf},
 };
@@ -124,19 +126,21 @@ fn main() {
         // todo: delete parents up to from if they contain
         // buffer the one before.
         // if the parent within the child
+        // between from and the target
 
         let deletable = from
             .ancestors()
-            .flat_map(|current| Some((current, current.parent()?)))
-            .filter(|(_, current)| !from.ends_with(current))
-            .find(|(_, parent)| {
+            .skip(1)
+            .take_while(|current| current != &args.target)
+            .filter_map(|current| Some((current, current.parent()?)))
+            .find_or_last(|(_, parent)| {
                 parent.read_dir().unwrap().any(|result| {
                     let file_type = result.unwrap().file_type().unwrap();
                     file_type.is_file() || file_type.is_symlink()
                 })
             })
             .map(|a| a.0)
-            .unwrap_or(&from);
+            .expect("Expect this not to be empty");
 
         if args.dry_run {
             info!("remove: {deletable:?}");
