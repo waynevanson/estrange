@@ -1,55 +1,115 @@
 {
+  description = "Build a cargo project";
+
   inputs = {
-    flake-compat.url = "https://flakehub.com/f/edolstra/flake-compat/1.tar.gz";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-analyzer-src.follows = "";
+    };
 
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils, ... }:
+  outputs = { self, nixpkgs, crane, fenix, flake-utils, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs { inherit system; };
-        overrides =
-          (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml));
-        libPath = with pkgs;
-          lib.makeLibraryPath [
-            # load external libraries that you need in your rust project here
+        pkgs = nixpkgs.legacyPackages.${system};
+
+        inherit (pkgs) lib;
+
+        craneLib = crane.mkLib pkgs;
+        src = craneLib.cleanCargoSource ./.;
+
+        # Common arguments can be set here to avoid repeating them later
+        commonArgs = {
+          inherit src;
+          strictDeps = true;
+
+          buildInputs = [
+            # Add additional build inputs here
+          ] ++ lib.optionals pkgs.stdenv.isDarwin [
+            # Additional darwin specific inputs can be set here
+            pkgs.libiconv
           ];
-      in {
-        devShells.default = pkgs.mkShell rec {
-          buildInputs = with pkgs; [
-            clang
-            # Replace llvmPackages with llvmPackages_X, where X is the latest LLVM version (at the time of writing, 16)
-            llvmPackages.bintools
-            rustup
-          ];
-          RUSTC_VERSION = overrides.toolchain.channel;
-          # https://github.com/rust-lang/rust-bindgen#environment-variables
-          LIBCLANG_PATH =
-            pkgs.lib.makeLibraryPath [ pkgs.llvmPackages_latest.libclang.lib ];
-          shellHook = ''
-            export PATH=$PATH:''${CARGO_HOME:-~/.cargo}/bin
-            export PATH=$PATH:''${RUSTUP_HOME:-~/.rustup}/toolchains/$RUSTC_VERSION-x86_64-unknown-linux-gnu/bin/
-          '';
-          # Add precompiled library to rustc search path
-          RUSTFLAGS = (builtins.map (a: "-L ${a}/lib") [
-            # add libraries here (e.g. pkgs.libvmi)
+
+          # Additional environment variables can be set directly
+          # MY_CUSTOM_VAR = "some value";
+        };
+
+        craneLibLLvmTools = craneLib.overrideToolchain
+          (fenix.packages.${system}.complete.withComponents [
+            "cargo"
+            "llvm-tools"
+            "rustc"
           ]);
-          LD_LIBRARY_PATH = libPath;
-          # Add glibc, clang, glib, and other headers to bindgen search path
-          BINDGEN_EXTRA_CLANG_ARGS =
-            # Includes normal include path
-            (builtins.map (a: ''-I"${a}/include"'') [
-              # add dev libraries here (e.g. pkgs.libvmi.dev)
-              pkgs.glibc.dev
-            ])
-            # Includes with special directory paths
-            ++ [
-              ''
-                -I"${pkgs.llvmPackages_latest.libclang.lib}/lib/clang/${pkgs.llvmPackages_latest.libclang.version}/include"''
-              ''-I"${pkgs.glib.dev}/include/glib-2.0"''
-              "-I${pkgs.glib.out}/lib/glib-2.0/include/"
-            ];
+
+        # Build *just* the cargo dependencies, so we can reuse
+        # all of that work (e.g. via cachix) when running in CI
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+        # Build the actual crate itself, reusing the dependency
+        # artifacts from above.
+        my-crate = craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
+        });
+      in
+      {
+        checks = {
+          # Build the crate as part of `nix flake check` for convenience
+          inherit my-crate;
+
+          # Run clippy (and deny all warnings) on the crate source,
+          # again, reusing the dependency artifacts from above.
+          #
+          # Note that this is done as a separate derivation so that
+          # we can block the CI if there are issues here, but not
+          # prevent downstream consumers from building our crate by itself.
+          my-crate-clippy = craneLib.cargoClippy (commonArgs // {
+            inherit cargoArtifacts;
+            cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+          });
+
+          my-crate-doc = craneLib.cargoDoc (commonArgs // {
+            inherit cargoArtifacts;
+          });
+
+          # Check formatting
+          my-crate-fmt = craneLib.cargoFmt {
+            inherit src;
+          };
+        };
+
+        packages = {
+          default = my-crate;
+        } // lib.optionalAttrs (!pkgs.stdenv.isDarwin) {
+          my-crate-llvm-coverage = craneLibLLvmTools.cargoLlvmCov (commonArgs // {
+            inherit cargoArtifacts;
+          });
+        };
+
+        apps.default = flake-utils.lib.mkApp {
+          drv = my-crate;
+        };
+
+        devShells.default = craneLib.devShell {
+          # Inherit inputs from checks.
+          checks = self.checks.${system};
+
+          # Additional dev-shell environment variables can be set directly
+          # MY_CUSTOM_DEVELOPMENT_VAR = "something else";
+
+          # Extra inputs can be added here; cargo and rustc are provided by default.
+          packages = [
+            # pkgs.ripgrep
+          ];
         };
       });
 }
