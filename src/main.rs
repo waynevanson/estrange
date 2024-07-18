@@ -4,12 +4,11 @@ mod relative_path;
 use clap::Parser;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 use contains_file_symlink_in_directory::ContainsDirectory;
-use itertools::Itertools;
 use log::{info, warn, LevelFilter};
 use std::{
     fs::{self, ReadDir},
     io,
-    path::{self, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 #[derive(Debug, Default, Parser)]
@@ -84,18 +83,18 @@ fn main() -> Result<(), io::Error> {
             continue;
         }
 
-        let (moveables, conflicts) = partition_conflicts(&args.target, &child)?;
+        let (moveable_files, conflicts_files) = partition_file_conflicts(&args.target, &child)?;
 
-        if conflicts.len() > 0 {
+        if conflicts_files.len() > 0 {
             warn!("Skipping directory, the following conflicts are present");
 
-            for conflict in conflicts {
+            for conflict in conflicts_files {
                 warn!("  {:?} -> {:?}", conflict.0, conflict.1);
             }
         }
 
-        for (from, to) in moveables {
-            if let Some(parent) = to.parent() {
+        for (from_file, to_file) in moveable_files {
+            if let Some(parent) = to_file.parent() {
                 if args.dry_run {
                     info!("create: {parent:?}");
                 } else {
@@ -104,32 +103,18 @@ fn main() -> Result<(), io::Error> {
             }
 
             if args.dry_run {
-                info!("move:    {from:?} -> {to:?}");
+                info!("move:    {from_file:?} -> {to_file:?}");
             } else {
-                fs::rename(from, to).unwrap()
+                fs::rename(from_file, to_file).unwrap()
             }
         }
 
-        let deletable = child
-            .ancestors()
-            .skip(1)
-            .take_while(|current| current != &args.target)
-            .filter_map(|current| Some((current, current.parent()?)))
-            .map(|(current, parent)| {
-                parent
-                    .contains_file_symlink_in_directory()
-                    .map(|file_types| (current, file_types))
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .find_or_last(|(_, keep)| *keep)
-            .map(|a| a.0)
-            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        let deletable_directory = get_deletable_directory(&child, &args.target)?;
 
         if args.dry_run {
-            info!("remove: {deletable:?}");
+            info!("remove: {deletable_directory:?}");
         } else {
-            fs::remove_dir_all(deletable)?;
+            fs::remove_dir_all(deletable_directory)?;
         }
     }
 
@@ -213,7 +198,7 @@ impl Iterator for FilesUnfollowed {
     }
 }
 
-fn partition_conflicts(
+fn partition_file_conflicts(
     target: &Path,
     child: &Path,
 ) -> Result<(Vec<(PathBuf, PathBuf)>, Vec<(PathBuf, PathBuf)>), io::Error> {
@@ -232,4 +217,32 @@ fn partition_conflicts(
     }
 
     Ok((moveables, conflicts))
+}
+
+fn get_deletable_directory<'a, 'b>(
+    current: &'a Path,
+    target: &'b Path,
+) -> Result<&'a Path, io::Error> {
+    let mut iterator = current.ancestors().peekable();
+
+    iterator.next();
+
+    let mut next = iterator.next();
+
+    while let Some(current) = next {
+        if let Some(parent) = current.parent() {
+            if parent == target
+                || parent.contains_file_symlink_in_directory()?
+                || iterator.peek() == None
+            {
+                return Ok(current);
+            }
+
+            next = iterator.next();
+        } else {
+            break;
+        }
+    }
+
+    Err(io::Error::from(io::ErrorKind::NotFound))
 }
