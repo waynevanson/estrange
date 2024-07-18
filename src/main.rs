@@ -1,7 +1,9 @@
+mod contains_file_symlink_in_directory;
 mod relative_path;
 
 use clap::Parser;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
+use contains_file_symlink_in_directory::ContainsDirectory;
 use itertools::Itertools;
 use log::{info, warn, LevelFilter};
 use std::{
@@ -68,13 +70,13 @@ fn main() {
     // todo: buffer so we can have dry run
     for child in args.sources {
         // Check that the child exists in the target.
-        let from = if child.is_absolute() {
+        let child = if child.is_absolute() {
             child.clone()
         } else {
             args.target.join(&child)
         };
 
-        let is_directory = from
+        let is_directory = child
             .metadata()
             .expect("[FATAL]: Expected to read the metadata from the path")
             .is_dir();
@@ -86,11 +88,11 @@ fn main() {
         }
 
         let (moveables, conflicts): (Vec<_>, Vec<_>) =
-            FilesUnfollowed::from(from.read_dir().unwrap())
+            FilesUnfollowed::from(child.read_dir().unwrap())
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap()
                 .into_iter()
-                .map(|filepath| (filepath.clone(), filepath.splice(&args.target, &from)))
+                .map(|filepath| (filepath.clone(), filepath.splice(&args.target, &child)))
                 // todo - try_partition or something from itertools?
                 .partition(|(_, to)| !to.try_exists().unwrap());
 
@@ -118,24 +120,15 @@ fn main() {
             }
         }
 
-        let deletable = from
+        let deletable = child
             .ancestors()
             .skip(1)
             .take_while(|current| current != &args.target)
             .filter_map(|current| Some((current, current.parent()?)))
             .map(|(current, parent)| {
                 parent
-                    .read_dir()
-                    .and_then(|read_dir| {
-                        read_dir
-                            .map(|dir_entry| {
-                                dir_entry
-                                    .and_then(|dir_entry| dir_entry.file_type())
-                                    .map(|file_type| file_type.is_file() || file_type.is_symlink())
-                            })
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                    .map(|file_types| (current, file_types.into_iter().any(|bool| bool)))
+                    .contains_file_symlink_in_directory()
+                    .map(|file_types| (current, file_types))
             })
             .collect::<Result<Vec<_>, _>>()
             .expect("Should have no issues here")
