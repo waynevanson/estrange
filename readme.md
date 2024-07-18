@@ -1,14 +1,22 @@
 # `estrange`
 
-A shell command that move child directories up their ancestors and delete the parents in between, making the directories in between "estranged".
+A cli tool that moves directories from within a target to the target, making the directories in between "estranged".
 
-## Dependencies
+## `--help`
 
-Compatible on Unix based systems that contain the following commands:
+```
+Usage: estrange [OPTIONS] [SOURCES]...
 
-- `sh`
-- `mv -t`
-- `rm -r`
+Arguments:
+  [SOURCES]...  The sources that we want to move into the target directory. Should be one or more sources, although this isn't validated yet
+
+Options:
+  -d, --dry-run          Applies reading operations, prints writing operations
+  -t, --target <TARGET>  The directory we want to move all our sources into. Defaults to the current working directory
+  -v, --verbose...       Increase logging verbosity
+  -q, --quiet...         Decrease logging verbosity
+  -h, --help             Print help
+```
 
 ## Quick start
 ```sh
@@ -46,5 +54,4 @@ Please write a test in `test.sh` to ensure your case is covered.
 
 Please consider the following before consuming this code.
 
-- I'm writing this to learn about POSIX scripting, so the software shouldn't be relied upon.
 - Covering my use case only unless asked otherwise.
