@@ -1,21 +1,18 @@
 mod relative_path;
-mod skip_last;
 
 use clap::Parser;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 use itertools::Itertools;
-use log::{info, warn};
-use skip_last::SkipLast;
+use log::{info, warn, LevelFilter};
 use std::{
-    fs::{self, read_dir, ReadDir},
+    fs::{self, ReadDir},
     io,
     path::{Path, PathBuf},
 };
 
 #[derive(Debug, Default, Parser)]
 struct Arguments {
-    /// Skips any operations that change the file system,
-    /// instead printing the changes that would apply to stdout.
+    /// Applies reading operations, prints writing operations.
     #[arg(short, long, alias = "dry")]
     dry_run: bool,
 
@@ -39,7 +36,7 @@ struct ParsedArguments {
     target: PathBuf,
     sources: Vec<PathBuf>,
     dry_run: bool,
-    log_level: Option<log::Level>,
+    log_filter: LevelFilter,
 }
 
 impl TryFrom<Arguments> for ParsedArguments {
@@ -55,7 +52,7 @@ impl TryFrom<Arguments> for ParsedArguments {
             dry_run: arguments.dry_run,
             sources: arguments.sources,
             target,
-            log_level: arguments.verbosity.log_level(),
+            log_filter: arguments.verbosity.log_level_filter(),
         })
     }
 }
@@ -63,12 +60,10 @@ impl TryFrom<Arguments> for ParsedArguments {
 fn main() {
     let args = Arguments::parse();
 
-    env_logger::builder()
-        .filter_level(args.verbosity.log_level_filter())
-        .init();
-
     let args = ParsedArguments::try_from(args)
         .expect("[FATAL]: Expected current working directory to exists");
+
+    env_logger::builder().filter_level(args.log_filter).init();
 
     // todo: buffer so we can have dry run
     for child in args.sources {
@@ -122,11 +117,6 @@ fn main() {
                 fs::rename(from, to).unwrap()
             }
         }
-
-        // todo: delete parents up to from if they contain
-        // buffer the one before.
-        // if the parent within the child
-        // between from and the target
 
         let deletable = from
             .ancestors()
