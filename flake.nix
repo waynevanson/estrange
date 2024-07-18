@@ -88,6 +88,10 @@
           my-crate-fmt = craneLib.cargoFmt {
             inherit src;
           };
+
+          my-crate-tarpaulin = craneLib.cargoTarpaulin {
+            inherit src cargoArtifacts;
+          };
         };
 
         packages = {
