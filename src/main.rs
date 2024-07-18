@@ -84,7 +84,7 @@ fn main() -> Result<(), io::Error> {
             continue;
         }
 
-        let (moveables, conflicts): (Vec<_>, Vec<_>) = partition_conflicts(&args.target, &child)?;
+        let (moveables, conflicts) = partition_conflicts(&args.target, &child)?;
 
         if conflicts.len() > 0 {
             warn!("Skipping directory, the following conflicts are present");
