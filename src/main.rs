@@ -59,7 +59,7 @@ impl TryFrom<Arguments> for ParsedArguments {
     }
 }
 
-fn main() {
+fn main() -> Result<(), io::Error> {
     let args = Arguments::parse();
 
     let args = ParsedArguments::try_from(args)
@@ -76,10 +76,7 @@ fn main() {
             args.target.join(&child)
         };
 
-        let is_directory = child
-            .metadata()
-            .expect("[FATAL]: Expected to read the metadata from the path")
-            .is_dir();
+        let is_directory = child.metadata()?.is_dir();
 
         if !is_directory {
             // todo: I mean this could just mean `rename`.
@@ -87,14 +84,12 @@ fn main() {
             continue;
         }
 
-        let (moveables, conflicts): (Vec<_>, Vec<_>) =
-            FilesUnfollowed::from(child.read_dir().unwrap())
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap()
-                .into_iter()
-                .map(|filepath| (filepath.clone(), filepath.splice(&args.target, &child)))
-                // todo - try_partition or something from itertools?
-                .partition(|(_, to)| !to.try_exists().unwrap());
+        let (moveables, conflicts): (Vec<_>, Vec<_>) = FilesUnfollowed::from(child.read_dir()?)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|filepath| (filepath.clone(), filepath.splice(&args.target, &child)))
+            // todo - try_partition or something from itertools?
+            .partition(|(_, to)| !to.try_exists().unwrap());
 
         if conflicts.len() > 0 {
             warn!("Skipping directory, the following conflicts are present");
@@ -130,19 +125,20 @@ fn main() {
                     .contains_file_symlink_in_directory()
                     .map(|file_types| (current, file_types))
             })
-            .collect::<Result<Vec<_>, _>>()
-            .expect("Should have no issues here")
+            .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .find_or_last(|(_, keep)| *keep)
             .map(|a| a.0)
-            .expect("Expect this not to be empty");
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
 
         if args.dry_run {
             info!("remove: {deletable:?}");
         } else {
-            fs::remove_dir_all(deletable).unwrap();
+            fs::remove_dir_all(deletable)?;
         }
     }
+
+    Ok(())
 }
 
 pub trait SplicePath {
