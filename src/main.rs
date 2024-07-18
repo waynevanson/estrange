@@ -9,7 +9,7 @@ use log::{info, warn, LevelFilter};
 use std::{
     fs::{self, ReadDir},
     io,
-    path::{Path, PathBuf},
+    path::{self, Path, PathBuf},
 };
 
 #[derive(Debug, Default, Parser)]
@@ -84,18 +84,13 @@ fn main() -> Result<(), io::Error> {
             continue;
         }
 
-        let (moveables, conflicts): (Vec<_>, Vec<_>) = FilesUnfollowed::from(child.read_dir()?)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|filepath| (filepath.clone(), filepath.splice(&args.target, &child)))
-            // todo - try_partition or something from itertools?
-            .partition(|(_, to)| !to.try_exists().unwrap());
+        let (moveables, conflicts): (Vec<_>, Vec<_>) = partition_conflicts(&args.target, &child)?;
 
         if conflicts.len() > 0 {
             warn!("Skipping directory, the following conflicts are present");
 
             for conflict in conflicts {
-                warn!("  {:?}", conflict.1);
+                warn!("  {:?} -> {:?}", conflict.0, conflict.1);
             }
         }
 
@@ -216,4 +211,26 @@ impl Iterator for FilesUnfollowed {
 
         None
     }
+}
+
+fn partition_conflicts(
+    target: &Path,
+    child: &Path,
+) -> Result<(Vec<(PathBuf, PathBuf)>, Vec<(PathBuf, PathBuf)>), io::Error> {
+    let mut moveables = Vec::new();
+    let mut conflicts = Vec::new();
+
+    for dir_entry in FilesUnfollowed::from(child.read_dir()?) {
+        let dir_entry = dir_entry?;
+        let from = dir_entry.to_path_buf();
+        let to = from.to_owned().splice(target, child);
+
+        if to.exists() {
+            conflicts.push((from, to));
+        } else {
+            moveables.push((from, to));
+        }
+    }
+
+    Ok((moveables, conflicts))
 }
