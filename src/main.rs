@@ -221,8 +221,7 @@ fn partition_conflicts(
     let mut conflicts = Vec::new();
 
     for dir_entry in FilesUnfollowed::from(child.read_dir()?) {
-        let dir_entry = dir_entry?;
-        let from = dir_entry.to_path_buf();
+        let from = dir_entry?.to_path_buf();
         let to = from.to_owned().splice(target, child);
 
         if to.exists() {
