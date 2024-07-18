@@ -123,11 +123,23 @@ fn main() {
             .skip(1)
             .take_while(|current| current != &args.target)
             .filter_map(|current| Some((current, current.parent()?)))
-            .find_or_last(|(_, parent)| {
-                parent.read_dir().unwrap().any(|result| {
-                    let file_type = result.unwrap().file_type().unwrap();
-                    file_type.is_file() || file_type.is_symlink()
-                })
+            .map(|(current, parent)| {
+                parent
+                    .read_dir()
+                    .and_then(|read_dir| {
+                        read_dir
+                            .map(|dir_entry| dir_entry.and_then(|dir_entry| dir_entry.file_type()))
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .map(|file_types| (current, file_types))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .expect("Should have no issues here")
+            .into_iter()
+            .find_or_last(|(_, file_types)| {
+                file_types
+                    .into_iter()
+                    .any(|file_type| file_type.is_file() || file_type.is_symlink())
             })
             .map(|a| a.0)
             .expect("Expect this not to be empty");
