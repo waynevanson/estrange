@@ -128,19 +128,19 @@ fn main() {
                     .read_dir()
                     .and_then(|read_dir| {
                         read_dir
-                            .map(|dir_entry| dir_entry.and_then(|dir_entry| dir_entry.file_type()))
+                            .map(|dir_entry| {
+                                dir_entry
+                                    .and_then(|dir_entry| dir_entry.file_type())
+                                    .map(|file_type| file_type.is_file() || file_type.is_symlink())
+                            })
                             .collect::<Result<Vec<_>, _>>()
                     })
-                    .map(|file_types| (current, file_types))
+                    .map(|file_types| (current, file_types.into_iter().any(|bool| bool)))
             })
             .collect::<Result<Vec<_>, _>>()
             .expect("Should have no issues here")
             .into_iter()
-            .find_or_last(|(_, file_types)| {
-                file_types
-                    .into_iter()
-                    .any(|file_type| file_type.is_file() || file_type.is_symlink())
-            })
+            .find_or_last(|(_, keep)| *keep)
             .map(|a| a.0)
             .expect("Expect this not to be empty");
 
